@@ -112,6 +112,71 @@ getent hosts sdp-desa1
 before assuming a connection failure is credentials-related — it's very
 likely this instead.
 
+## Critical gotcha: every new table needs THREE steps, not just CREATE TABLE
+
+Confirmed through direct testing (`AQUA_USUARIO_INTERNO` and friends). A table
+created as `USE_MEDHA` is invisible to the app (`USE_MEDHA_CONEX`) until BOTH
+of the following are also done — skipping either produces a real, blocking
+error, not a warning:
+
+1. **`CREATE TABLE ...`** — as `USE_MEDHA` (the object owner; `USE_MEDHA_CONEX`
+   lacks `CREATE TRIGGER`/`CREATE PROCEDURE`, confirmed via `SESSION_PRIVS`,
+   so sequences+triggers for auto-incrementing IDs must be created here too).
+2. **`GRANT SELECT, INSERT, UPDATE, DELETE ON <table> TO USE_MEDHA_CONEX;`**
+   — as `USE_MEDHA`. Without this, `USE_MEDHA_CONEX` gets
+   `ORA-00942: table or view does not exist` even though the table is real.
+3. **`CREATE SYNONYM <table> FOR USE_MEDHA.<table>;`** — as `USE_MEDHA_CONEX`.
+   **The grant alone is NOT enough.** Without the synonym, bare-name queries
+   (`SELECT * FROM AQUA_USUARIO_INTERNO`, and critically, every TypeORM query
+   TypeORM generates, since entities reference tables by bare name) STILL fail
+   with `ORA-00942`, because Oracle looks for the table inside the querying
+   user's OWN schema first, and `USE_MEDHA_CONEX` doesn't have one by that
+   name — it needs an explicit synonym pointing to `USE_MEDHA`'s copy.
+
+**Reusable template for every new table going forward:**
+```sql
+-- As USE_MEDHA:
+CREATE TABLE <TABLE_NAME> ( ... );
+CREATE SEQUENCE <TABLE_NAME>_SEQ START WITH 1 INCREMENT BY 1;
+CREATE OR REPLACE TRIGGER <TABLE_NAME>_BIR
+BEFORE INSERT ON <TABLE_NAME>
+FOR EACH ROW
+WHEN (NEW.<PK_COLUMN> IS NULL)
+BEGIN
+  SELECT <TABLE_NAME>_SEQ.NEXTVAL INTO :NEW.<PK_COLUMN> FROM dual;
+END;
+GRANT SELECT, INSERT, UPDATE, DELETE ON <TABLE_NAME> TO USE_MEDHA_CONEX;
+
+-- As USE_MEDHA_CONEX:
+CREATE SYNONYM <TABLE_NAME> FOR USE_MEDHA.<TABLE_NAME>;
+```
+
+**Worth asking the DBA**: whether `USE_MEDHA_CONEX` could instead get a
+standing arrangement (e.g. PUBLIC synonyms, created once by `USE_MEDHA` at
+table-creation time) so this doesn't need to be repeated by hand for every
+single table as the schema grows. Not yet asked — revisit if this becomes
+tedious across dozens of tables.
+
+**Debugging tip**: `SELECT USER FROM dual;` before every DDL/grant/synonym
+statement, every time, no exceptions. Several real debugging sessions tonight
+were caused purely by assuming which DBeaver tab/connection was active and
+being wrong — this one-line check would have caught each instance immediately.
+
+## Known TypeORM + Oracle + trigger-generated-ID quirk
+
+When a table's primary key is populated by an Oracle trigger (not TypeORM's
+own generation strategy), `repository.save()` inserts the row correctly, but
+the returned JS object's ID field comes back as `undefined` — TypeORM has no
+built-in way to read back a trigger-populated value the way it does with
+`IDENTITY` columns or native `RETURNING` support for its own generators. The
+row in the database is correct; only the in-memory return value is missing
+the ID. Confirmed via `scripts/test-user-entity.ts`.
+
+**Not yet solved properly.** Workarounds to explore later: a custom raw query
+using `RETURNING <PK_COLUMN> INTO :id` after insert, or re-fetching the row
+by a unique field (e.g. email) immediately after `save()` when the ID is
+needed right away in the same request.
+
 ## Database credentials — two accounts, different jobs (confirmed via DBeaver testing)
 
 - **`USE_MEDHA`** — schema/object owner. Has DDL privileges (`CREATE TABLE`,
@@ -195,14 +260,32 @@ npm install <packages> --legacy-peer-deps
 ## Current status (this session)
 
 - Raw `oracledb` connection: proven working (thick mode).
-- TypeORM connection via `EntitySchema` (not yet decorator-based entities):
-  proven working, both read and write, against a throwaway `TEST_ITEMS`
-  table created manually for this purpose.
-- Real domain entities (`ClientSubmission`, `ClientUser`, etc.): NOT yet
-  started — blocked on the two open naming/modeling questions above.
-- Auth.js + `@auth/typeorm-adapter` wiring: NOT yet started.
-- Folder structure mirrored from the original app's `CLAUDE.md` conventions
-  (see below) — currently placeholder/empty files.
+- TypeORM connection via `EntitySchema`: proven working, both read and write,
+  against a throwaway `TEST_ITEMS` table AND against a real trigger-backed
+  table (`AQUA_USUARIO_INTERNO`), including the full
+  CREATE TABLE → GRANT → CREATE SYNONYM pattern documented above.
+- Auth-related entities created as PLACEHOLDERS, pending the real naming
+  convention answers: `User` (→ `AQUA_USUARIO_INTERNO`), `ClientUser`
+  (→ `AQUA_CLIENTE_USUARIO`), `AuthAccount` (→ `AQUA_AUTH_ACCOUNT`),
+  `AuthVerificationToken` (→ `AQUA_AUTH_VERIF_TOKEN`) — all four tables exist
+  in Oracle now, owned by `USE_MEDHA`, granted + synonym'd for
+  `USE_MEDHA_CONEX`. Table names, column choices, and PK strategy on these
+  are NOT final — see open questions above.
+- No `Session` entity — matches the original app's `session: { strategy:
+  "jwt" }`, so Auth.js never persists sessions to the DB; only `Account` and
+  `VerificationToken` are needed for the adapter.
+- Real domain entities (`ClientSubmission`, etc.): NOT yet started — blocked
+  on the two open naming/modeling questions above.
+- Auth.js + `@auth/typeorm-adapter` wiring in `auth.ts`/`auth.config.ts`:
+  NOT yet started — entities are ready, this is the next real step.
+- Folder structure mirrored from the original app's `CLAUDE.md` conventions,
+  now correctly under `src/` (moved from an initial mistaken root-level
+  scaffold — `tsconfig.json`'s `paths` updated to `"@/*": ["./src/*"]`
+  accordingly). `next.config.ts` updated with
+  `serverExternalPackages: ["oracledb", "typeorm"]`, mirroring the original
+  app's same requirement for `pg`.
+- A companion file, `CLAUDE-POSTGRES.md`, holds the ORIGINAL Postgres/Prisma
+  app's CLAUDE.md verbatim, for reference only — not describing this repo.
 
 ## Folder structure (mirrors the original `aquasave` repo's conventions)
 

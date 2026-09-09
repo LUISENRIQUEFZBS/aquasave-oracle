@@ -2,6 +2,10 @@
 import "reflect-metadata";
 import oracledb from "oracledb";
 import { DataSource } from "typeorm";
+import { User } from "@/entities/User";
+import { ClientUser } from "@/entities/ClientUser";
+import { AuthAccount } from "@/entities/AuthAccount";
+import { AuthVerificationToken } from "@/entities/AuthVerificationToken";
 
 // Thick mode initialization — required for USE_MEDHA_CONEX's password verifier type.
 // Must run once, before any DataSource is created. Guarded the same way as the
@@ -29,7 +33,7 @@ function buildDataSource(): DataSource {
     serviceName: process.env.ORACLE_SERVICE_NAME ?? "SAPLIDES",
     username: process.env.ORACLE_USER ?? "USE_MEDHA_CONEX",
     password: process.env.ORACLE_PASSWORD,
-    entities: [], // TODO: populate as entities are created, e.g. [ClientSubmissionEntity, ...]
+    entities: [User, ClientUser, AuthAccount, AuthVerificationToken],
     synchronize: false, // NEVER true against this real, shared database — see CLAUDE.md's migration discipline
     logging: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
