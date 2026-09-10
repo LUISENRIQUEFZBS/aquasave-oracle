@@ -1,17 +1,43 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
-import { getDb } from "@/lib/db"; // side-effect: initializes Oracle thick mode
+import { getDb } from "@/lib/db";
 import { User } from "@/entities/User";
 import { ClientUser } from "@/entities/ClientUser";
 import { authConfig } from "@/auth.config";
+import * as adapterEntities from "@/lib/auth-adapter-entities";
+
+const { TypeORMAdapter } = await import("@auth/typeorm-adapter");
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   session: { strategy: "jwt" },
+  adapter: TypeORMAdapter(
+    {
+      type: "oracle",
+      host: process.env.ORACLE_HOST,
+      port: Number(process.env.ORACLE_PORT),
+      serviceName: process.env.ORACLE_SERVICE_NAME,
+      username: process.env.ORACLE_USER,
+      password: process.env.ORACLE_PASSWORD,
+      synchronize: false,
+    },
+    { entities: adapterEntities }
+  ),
   providers: [
+    Google({
+      id: "google-internal",
+      clientId: process.env.AUTH_GOOGLE_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
+    }),
+    Google({
+      id: "google-client",
+      clientId: process.env.AUTH_GOOGLE_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
+    }),
     Credentials({
-      id: "credentials-internal",
+      id: "credentials", // internal — matches InternalLoginForm's signIn("credentials", ...)
       name: "Correo y contraseña (interno)",
       credentials: { email: {}, password: {} },
       async authorize(creds) {
@@ -33,7 +59,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
     Credentials({
-      id: "credentials-client",
+      id: "client-credentials", // matches ClientLoginForm's signIn("client-credentials", ...)
       name: "Correo y contraseña (cliente)",
       credentials: { email: {}, password: {} },
       async authorize(creds) {
