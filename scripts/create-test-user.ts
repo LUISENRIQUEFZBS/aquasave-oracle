@@ -11,16 +11,18 @@ async function run() {
 
   const user = repo.create({
     name: "Admin de Prueba",
-    email: "admin@sedapal.com.pe",
+    email: "admin2@sedapal.com.pe",
     passwordHash,
     role: "ADMIN",
-    active: true,
-    createdAt: new Date(),
+    status: 1,
+    indicador: "1",
+    createdBy: "sistema",
     updatedAt: null,
+    updatedBy: null,
   });
 
   await repo.save(user);
-  console.log("Test user created: admin@sedapal.com.pe / Test1234!");
+  console.log("Test user created: admin2@sedapal.com.pe / Test1234!");
 
   await db.destroy();
 }

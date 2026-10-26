@@ -1,34 +1,40 @@
 import type { NextAuthConfig } from "next-auth";
 
 export const authConfig: NextAuthConfig = {
+  session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
     error: "/login",
   },
-  // Real providers (need DB access) are added in auth.ts, not here — mirrors
-  // the real app: proxy.ts only checks "session exists?" via this edge-safe
-  // config, since Prisma/TypeORM can't run at the edge.
   providers: [],
   callbacks: {
-    jwt({ token, user }) {
+    jwt: async ({ token, user }) => {
       if (user) {
-        // @ts-expect-error - custom fields attached by our providers in auth.ts
-        token.userType = user.userType;
-        // @ts-expect-error
-        token.role = user.role;
-        // @ts-expect-error
-        token.clientId = user.clientId;
+        token.id = user.id as string;
+        token.userType = (user as { userType?: "internal" | "client" }).userType;
+        if ((user as { role?: string }).role) {
+          token.role = (user as { role: string }).role;
+        }
+        if ((user as { clientId?: number }).clientId) {
+          token.clientId = (user as { clientId: number }).clientId;
+          token.clientRole = (user as { clientRole: string }).clientRole;
+        }
+        if ((user as { image?: string | null }).image) {
+          token.picture = (user as { image?: string | null }).image;
+        }
       }
       return token;
     },
-    session({ session, token }) {
+    session: async ({ session, token }) => {
       if (session.user) {
-        // @ts-expect-error
-        session.user.userType = token.userType;
-        // @ts-expect-error
-        session.user.role = token.role;
-        // @ts-expect-error
-        session.user.clientId = token.clientId;
+        session.user.id = token.id as string;
+        session.user.userType = token.userType as "internal" | "client";
+        if (token.role) session.user.role = token.role as string;
+        if (token.clientId) {
+          session.user.clientId = token.clientId as number;
+          session.user.clientRole = token.clientRole as string;
+        }
+        session.user.image = (token.picture as string | undefined) ?? null;
       }
       return session;
     },

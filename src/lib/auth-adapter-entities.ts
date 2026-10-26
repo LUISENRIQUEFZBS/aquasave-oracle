@@ -41,7 +41,7 @@ export class AccountEntity {
   @PrimaryGeneratedColumn("uuid", { name: "VCOD" })
   id!: string;
 
-  @Column({ type: "varchar", length: 36, name: "VCODUSUARIO" })
+  @Column({ type: "varchar", length: 36})
   userId!: string;
 
   @Column({ type: "varchar", name: "VTIPO" })
@@ -94,7 +94,7 @@ export class SessionEntity {
   @Column({ type: "varchar", unique: true, name: "VSESSION_TOKEN" })
   sessionToken!: string;
 
-  @Column({ type: "varchar", length: 36, name: "VCODUSUARIO" })
+  @Column({ type: "varchar", length: 36 })
   userId!: string;
 
   @Column({ type: "varchar", transformer: dateTransformer, name: "VEXPIRA" })
