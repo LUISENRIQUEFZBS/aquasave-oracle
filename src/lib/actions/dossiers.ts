@@ -87,6 +87,7 @@ export async function getDossierDetail(id: number) {
               receiverName: r.receiverUserId ? receiverName.get(r.receiverUserId) ?? null : null }
           : null;
       })(),
+      variantIds: links.filter((l) => l.productId === p.id).map((l) => l.variantId),
       variantLabels: links.filter((l) => l.productId === p.id).map((l) => variantLabel.get(l.variantId) ?? "?"),
     })),
   };

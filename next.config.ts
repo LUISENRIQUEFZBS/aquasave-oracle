@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["oracledb", "typeorm"],
+  serverExternalPackages: ["oracledb", "typeorm", "@react-pdf/renderer"],
   experimental: {
     serverActions: { bodySizeLimit: "10mb" },
   },

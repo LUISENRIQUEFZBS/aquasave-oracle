@@ -8,13 +8,13 @@ const NAV_ITEMS = [
   { href: "/", label: "Expedientes", icon: FolderIcon, built: true },
   { href: "/reviews", label: "Revisión de solicitudes", icon: ClipboardCheckIcon, built: false },
   { href: "/clients", label: "Clientes", icon: UsersIcon, built: true },
-  { href: "/dispatch", label: "Despacho", icon: TruckIcon, built: false },
+  { href: "/dispatch", label: "Despacho", icon: TruckIcon, built: true },
   { href: "/instruments", label: "Instrumentos", icon: GaugeIcon, built: true },
 ];
 const ADMIN_NAV_ITEMS = [
-  { href: "/types", label: "Tipos de producto", icon: TagIcon, built: false },
+  { href: "/types", label: "Tipos de producto", icon: TagIcon, built: true },
   { href: "/catalogs", label: "Catálogos", icon: BookIcon, built: true },
-  { href: "/users", label: "Usuarios", icon: UsersIcon, built: false },
+  { href: "/users", label: "Usuarios", icon: UsersIcon, built: true },
 ];
 export default function Sidebar({
   open,

@@ -177,3 +177,17 @@ export async function setReferenceVariantStatus(id: number, status: number) {
     revalidatePath("/types");
   });
 }
+
+/** How many products use each catalog row (by id), for the "N productos" label. */
+export async function getCatalogUsage() {
+  await requireInternal();
+  const db = await getDb();
+  const count = async (col: string) => {
+    const rows: { ID: number | null; N: number }[] = await db.query(`SELECT ${col} AS ID, COUNT(*) AS N FROM AQUA_PRODUCTO WHERE ${col} IS NOT NULL GROUP BY ${col}`);
+    return Object.fromEntries(rows.map((r) => [String(r.ID), Number(r.N)])) as Record<string, number>;
+  };
+  const [brand, manufacturer, country, type] = await Promise.all([
+    count("NCODMARCA"), count("NCODFABRICANTE"), count("NCODPAISORIGEN"), count("NCODTIPOPRODUCTO"),
+  ]);
+  return { brand, manufacturer, country, type };
+}

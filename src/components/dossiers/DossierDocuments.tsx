@@ -1,0 +1,236 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Drawer from "@/components/ui/Drawer";
+import { useAction } from "@/components/ui/useAction";
+import { btn, btnPrimary, card, input, muted } from "@/components/ui/styles";
+import { fileUrl } from "@/lib/file-url";
+import { formatLima } from "@/lib/dates";
+import { DOC_STATUS, DOC_STATUS_LABELS, DOC_TYPE, GENERATED_TYPE, GENERATED_META } from "@/lib/dossier-documents";
+import {
+  setDossierDocumentStatus,
+  uploadDossierDocument,
+  updateDossierGeneralData,
+  generateDocument,
+  uploadSignedDocument,
+  type DocumentsOverview,
+  type DocRow,
+  type GeneralData,
+} from "@/lib/actions/dossierDocuments";
+
+const STATUS_STYLES: Record<number, string> = { 1: "bg-warning/10 text-warning", 2: "bg-success/10 text-success", 3: "bg-bg text-text-muted" };
+const SHOW_GENERATED = false;
+const pill = "rounded-full px-2 py-0.5 text-xs font-medium";
+const linkBtn = "inline-flex min-h-11 items-center rounded-md border border-border px-3 text-xs font-medium text-text-muted hover:bg-bg sm:min-h-0 sm:py-1";
+
+export default function DossierDocuments({ dossierId, open, overview }: { dossierId: number; open: boolean; overview: DocumentsOverview }) {
+  const [editingGeneral, setEditingGeneral] = useState(false);
+  const applicable = overview.documents.filter((d) => d.status !== DOC_STATUS.NOT_APPLICABLE).length;
+  const received = overview.documents.filter((d) => d.status === DOC_STATUS.RECEIVED).length;
+
+  return (
+    <section className={card + " space-y-3"}>
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-medium">Documentos del expediente</h2>
+        <span className="text-xs text-text-muted">{received}/{applicable} recibidos</span>
+      </div>
+      <div className="space-y-2">
+        {overview.documents.flatMap((doc) => {
+          const isForm = doc.type === DOC_TYPE.FORM_GCFO0182;
+          const hint = doc.type === DOC_TYPE.SWORN_DECLARATION
+            ? overview.swornSuggestion
+              ? "Sugerencia: se recomienda, al menos un producto de este expediente fue aprobado."
+              : "Sugerencia: no parece requerirse, ningún producto fue aprobado todavía. Puedes marcarla igual si corresponde."
+            : isForm
+              ? "Se genera con los datos generales y los productos del expediente."
+              : doc.hint;
+          const row = <DocRowItem key={doc.type} dossierId={dossierId} open={open} doc={doc} hint={hint} isForm={isForm} onEditGeneral={() => setEditingGeneral(true)} />;
+          return isForm
+            ? [row, <ProgressRow key="fichas" title="Fichas técnicas" empty="Este expediente todavía no tiene productos." note="Se cuenta sola: la ficha de cada producto se sube en su tarjeta." done={overview.fichaProgress.withCount} total={overview.fichaProgress.totalCount} />,
+               <ProgressRow key="certs" title="Certificados" empty="Todavía no hay productos aprobados en este expediente." note="Se cuenta sola al emitir el certificado de cada producto aprobado." done={overview.certificateProgress.certifiedCount} total={overview.certificateProgress.eligibleCount} />]
+            : [row];
+        })}
+      </div>
+
+      {/* Hidden like in the old app: the letter/declaration templates still have placeholder wording.
+          Staff upload the signed scans through the checklist rows above. Re-enable when real wording exists. */}
+      {SHOW_GENERATED && <GeneratedSection dossierId={dossierId} open={open} items={overview.generated} />}
+
+      <Drawer open={editingGeneral} onClose={() => setEditingGeneral(false)} title="Formulario GCFO0182 - Datos generales">
+        {editingGeneral && <GeneralDataForm dossierId={dossierId} initial={overview.generalData} onDone={() => setEditingGeneral(false)} />}
+      </Drawer>
+    </section>
+  );
+}
+
+function ProgressRow({ title, note, empty, done, total }: { title: string; note: string; empty: string; done: number; total: number }) {
+  const complete = total > 0 && done === total;
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm text-text">{title}</p>
+          <p className="text-xs text-text-muted">{total === 0 ? empty : note}</p>
+        </div>
+        <span className={`${pill} ${total === 0 ? STATUS_STYLES[3] : complete ? STATUS_STYLES[2] : STATUS_STYLES[1]}`}>{done}/{total}</span>
+      </div>
+    </div>
+  );
+}
+
+function DocRowItem({ dossierId, open, doc, hint, isForm, onEditGeneral }: { dossierId: number; open: boolean; doc: DocRow; hint?: string; isForm: boolean; onEditGeneral: () => void }) {
+  const router = useRouter();
+  const { pending, error, run } = useAction();
+  const [notes, setNotes] = useState(doc.notes ?? "");
+  const [showNotes, setShowNotes] = useState(!!doc.notes);
+  const settled = !!doc.filePath || doc.autoGenerated;
+  const url = fileUrl(doc.filePath);
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm text-text">{doc.label}</p>
+          {doc.receivedAt && <p className="text-xs text-text-muted">Recibido: {formatLima(doc.receivedAt)}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`${pill} ${STATUS_STYLES[doc.status]}`}>{DOC_STATUS_LABELS[doc.status]}</span>
+          {open && !settled && (
+            <select
+              value={doc.status}
+              disabled={pending}
+              onChange={(e) => run(() => setDossierDocumentStatus(dossierId, doc.type, Number(e.target.value), notes), () => router.refresh())}
+              className="min-h-11 rounded-md border border-border bg-surface px-2 text-base sm:min-h-0 sm:py-1 sm:text-xs"
+            >
+              <option value={DOC_STATUS.PENDING}>Pendiente</option>
+              <option value={DOC_STATUS.RECEIVED}>Recibido</option>
+              <option value={DOC_STATUS.NOT_APPLICABLE}>No aplica</option>
+            </select>
+          )}
+          {isForm ? (
+            <>
+              {open && <button type="button" className={linkBtn} onClick={onEditGeneral}>Editar datos</button>}
+              <a href={`/api/dossier-gcfo0182-pdf/${dossierId}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-md border border-primary px-3 text-xs font-medium text-primary hover:bg-primary/5 sm:min-h-0 sm:py-1">Ver formulario (PDF)</a>
+            </>
+          ) : (
+            <>
+              {open && (
+                <label className={linkBtn + " cursor-pointer"}>
+                  {doc.filePath ? "Reemplazar" : "Subir"}
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" disabled={pending}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      const fd = new FormData();
+                      fd.append("file", f);
+                      run(() => uploadDossierDocument(dossierId, doc.type, fd), () => router.refresh());
+                    }} />
+                </label>
+              )}
+              {url && <a href={url} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">Ver</a>}
+            </>
+          )}
+          <button type="button" className="min-h-11 text-xs font-medium text-text-muted hover:text-text sm:min-h-0" onClick={() => setShowNotes(!showNotes)}>Notas</button>
+        </div>
+      </div>
+      {hint && <p className="mt-1.5 text-xs text-text-muted">{hint}</p>}
+      {showNotes && (
+        <div className="mt-2 flex gap-2">
+          <input className={input} value={notes} disabled={!open} onChange={(e) => setNotes(e.target.value)} placeholder="Notas (opcional)" />
+          {open && <button type="button" className={btn} disabled={pending} onClick={() => run(() => setDossierDocumentStatus(dossierId, doc.type, doc.status, notes), () => router.refresh())}>Guardar</button>}
+        </div>
+      )}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
+function GeneratedSection({ dossierId, open, items }: { dossierId: number; open: boolean; items: DocumentsOverview["generated"] }) {
+  const router = useRouter();
+  const { pending, error, run } = useAction();
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <h3 className="text-sm font-semibold text-text">Documentos generados</h3>
+      <p className={muted}>Las plantillas son provisionales: el texto del PDF indica que debe reemplazarse por la redacción real antes de enviarse a un cliente.</p>
+      {open && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btn} disabled={pending} onClick={() => run(() => generateDocument(dossierId, GENERATED_TYPE.RESPONSE_LETTER), () => router.refresh())}>Generar carta de respuesta</button>
+          <button type="button" className={btn} disabled={pending} onClick={() => run(() => generateDocument(dossierId, GENERATED_TYPE.SWORN_DECLARATION), () => router.refresh())}>Generar declaración jurada</button>
+        </div>
+      )}
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {items.length === 0 && <p className={muted}>Todavía no se generó ningún documento.</p>}
+      {items.map((g) => <GeneratedRow key={g.id} item={g} open={open} />)}
+    </div>
+  );
+}
+
+function GeneratedRow({ item, open }: { item: DocumentsOverview["generated"][number]; open: boolean }) {
+  const router = useRouter();
+  const { pending, error, run } = useAction();
+  const pdf = fileUrl(item.pdfPath);
+  const signed = fileUrl(item.signedFilePath);
+  return (
+    <div className="rounded-md border border-border p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-text">{GENERATED_META[item.type]?.label ?? item.label}</p>
+          <p className="text-xs text-text-muted">Generado {formatLima(item.generatedAt)} por {item.generatedBy}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {pdf && <a href={pdf} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">Ver PDF</a>}
+          {signed && <a href={signed} target="_blank" rel="noreferrer" className="text-xs font-medium text-success hover:underline">Ver firmado{item.signedAt ? ` (${formatLima(item.signedAt)})` : ""}</a>}
+          {open && (
+            <label className={linkBtn + " cursor-pointer"}>
+              {signed ? "Reemplazar firmado" : "Subir firmado"}
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" disabled={pending}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  const fd = new FormData();
+                  fd.append("file", f);
+                  run(() => uploadSignedDocument(item.id, fd), () => router.refresh());
+                }} />
+            </label>
+          )}
+        </div>
+      </div>
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
+function GeneralDataForm({ dossierId, initial, onDone }: { dossierId: number; initial: GeneralData; onDone: () => void }) {
+  const router = useRouter();
+  const { pending, error, run } = useAction();
+  const [f, setF] = useState<GeneralData>(initial);
+  const field = (k: keyof GeneralData, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <label className="block space-y-1.5">
+      <span className="text-sm font-medium">{label}</span>
+      <input className={input} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} {...props} />
+    </label>
+  );
+  return (
+    <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); run(() => updateDossierGeneralData(dossierId, f), () => { router.refresh(); onDone(); }); }}>
+      <p className={muted}>Estos datos se imprimen en el formulario GCFO0182 (sin tildes: el sistema las convierte).</p>
+      {field("registryNumber", "N° ficha registral")}
+      {field("address", "Dirección")}
+      <div className="grid gap-4 sm:grid-cols-3">{field("district", "Distrito")}{field("province", "Provincia")}{field("department", "Departamento")}</div>
+      {field("legalRepresentative", "Representante legal")}
+      {field("companyPhone", "Teléfono de la empresa", { inputMode: "tel" })}
+      {field("companyEmail", "Correo de la empresa", { type: "email" })}
+      <div className="space-y-3 rounded-md border border-border p-3">
+        <p className="text-sm font-semibold">Persona de contacto</p>
+        {field("contactName", "Nombres")}
+        {field("contactPhone", "Teléfono", { inputMode: "tel" })}
+        {field("contactEmail", "Correo", { type: "email" })}
+      </div>
+      <label className="block space-y-1.5"><span className="text-sm font-medium">Observaciones</span>
+        <textarea className={input} rows={3} value={f.generalNotes} onChange={(e) => setF({ ...f, generalNotes: e.target.value })} /></label>
+      {error && <p className="text-sm text-danger" role="alert">{error}</p>}
+      <button className={btnPrimary + " w-full"} disabled={pending}>{pending ? "Guardando..." : "Guardar datos"}</button>
+    </form>
+  );
+}

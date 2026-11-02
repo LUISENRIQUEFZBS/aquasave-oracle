@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 import { finalizeEvaluation, type EvaluationDetail } from "@/lib/actions/evaluations";
 import type { InstrumentView } from "@/lib/actions/instruments";
 import { useAction } from "@/components/ui/useAction";
+import { emitCertificate } from "@/lib/actions/certificates";
+import { fileUrl } from "@/lib/file-url";
+import { confirmToast } from "@/lib/confirm-toast";
 import {
   SAVINGS_SCORE_TABLE,
   WARRANTY_SCORE_TABLE,
@@ -123,14 +126,39 @@ function SavedNote({ evaluation }: { evaluation: EvaluationDetail }) {
 
 /** Certificate emission/preview is built in the next module; for now it only reports what exists. */
 function CertificateSection({ evaluation }: { evaluation: EvaluationDetail }) {
+  const router = useRouter();
+  const { pending, error, run } = useAction();
   if (!evaluation.result) return null;
+  const pdf = fileUrl(evaluation.certificate?.pdfPath);
+  const linkCls = "inline-flex min-h-11 items-center justify-center rounded-md border border-border px-4 text-sm font-medium text-primary hover:bg-bg sm:min-h-0 sm:py-2";
   return (
-    <div className="space-y-2 rounded-md border border-border p-3">
+    <div className="space-y-3 rounded-md border border-border p-3">
       <h3 className="text-sm font-semibold text-text">Certificado</h3>
       {evaluation.certificate ? (
-        <p className="rounded-md bg-success/10 p-3 text-sm font-medium text-success">Certificado emitido: {evaluation.certificate.number}</p>
+        <>
+          <p className="rounded-md bg-success/10 p-3 text-sm font-medium text-success">Certificado emitido: {evaluation.certificate.number}</p>
+          {pdf && <a href={pdf} target="_blank" rel="noreferrer" className={linkCls}>Ver PDF oficial</a>}
+        </>
       ) : evaluation.result === "CONFORME" ? (
-        <p className="text-xs text-text-muted">La emisión del certificado se habilitará en el siguiente módulo.</p>
+        evaluation.productHasCertificate ? (
+          <p className="text-xs text-text-muted">Este producto ya tiene un certificado emitido desde otra evaluación.</p>
+        ) : (
+          <>
+            <p className="text-xs text-text-muted">Revise la vista previa. La emisión asigna el número oficial y no se puede deshacer.</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <a href={`/api/certificates/preview/${evaluation.id}`} target="_blank" rel="noreferrer" className={linkCls}>Vista previa (borrador)</a>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={async () => { if (await confirmToast("¿Emitir el certificado oficial? Esta acción no se puede deshacer.")) run(() => emitCertificate(evaluation.id), () => router.refresh()); }}
+                className="min-h-11 rounded-md bg-primary px-4 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-60 sm:min-h-0 sm:py-2"
+              >
+                {pending ? "Emitiendo..." : "Emitir certificado oficial"}
+              </button>
+            </div>
+            {error && <p className="text-sm text-danger">{error}</p>}
+          </>
+        )
       ) : (
         <p className="text-xs text-text-muted">Solo las evaluaciones Conformes pueden certificarse.</p>
       )}

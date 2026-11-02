@@ -48,6 +48,15 @@ type Computed = {
 };
 type StoredData = EvaluationData & { computed?: Computed };
 
+
+/**
+ * JSON for the CLOB column. The database character set is US7ASCII (turns accents into "?"), so every
+ * non-ASCII character is written as a \uXXXX escape; JSON.parse restores it when reading.
+ */
+function toJson(data: unknown): string {
+  return JSON.stringify(data).replace(/[\u0080-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+}
+
 function parseData(raw: unknown): StoredData {
   const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!obj || typeof obj !== "object") throw new Error("Los datos de la evaluación están dañados.");
@@ -132,7 +141,7 @@ async function mutateData(evaluationId: number, s: InternalSession, fn: (data: S
     const { product, dossier } = await loadProductContext(m, ev.productId);
     const data = parseData(ev.data);
     fn(data, { product });
-    await m.getRepository(Evaluation).update({ id: ev.id }, { data: JSON.stringify(data), ...updateAudit(s.audit) });
+    await m.getRepository(Evaluation).update({ id: ev.id }, { data: toJson(data), ...updateAudit(s.audit) });
     return { ev, dossierId: dossier.id };
   });
   revalidateEvaluation(dossierId, ev.productId, ev.id);
@@ -149,6 +158,7 @@ export type EvaluationListItem = {
   evaluatorName: string;
   pruebaCount: number;
   hasCertificate: boolean;
+  photoPath: string | null;
 };
 
 export async function getProductForEvaluation(productId: number) {
@@ -180,6 +190,7 @@ export async function getProductForEvaluation(productId: number) {
       evaluatorName: names.get(e.evaluatorUserId) ?? "—",
       pruebaCount,
       hasCertificate: certificate?.evaluationId === e.id,
+      photoPath: e.photoPath,
     };
   });
   return {
@@ -233,7 +244,7 @@ export async function getEvaluationById(evaluationId: number) {
     pressureGaugeInstrumentId: ev.pressureGaugeInstrumentId,
     stopwatchInstrumentId: ev.stopwatchInstrumentId,
     // Certificate for THIS evaluation (locks editing) vs. any certificate on the product (locks re-selecting).
-    certificate: certificate && certificate.evaluationId === ev.id ? { id: certificate.id, number: certificate.certificateNumber } : null,
+    certificate: certificate && certificate.evaluationId === ev.id ? { id: certificate.id, number: certificate.certificateNumber, pdfPath: certificate.pdfPath } : null,
     productHasCertificate: !!certificate,
     product: {
       id: product.id,
@@ -299,7 +310,7 @@ export async function createEvaluationShell(formData: FormData) {
       const id = await insertReturningId(m, Evaluation, {
         productId,
         method: type.method,
-        data: JSON.stringify(data),
+        data: toJson(data),
         result: null,
         selectedForCertificate: 0,
         photoPath,
@@ -473,7 +484,7 @@ export async function finalizeEvaluation(input: {
       await m.getRepository(Evaluation).update(
         { id: ev.id },
         {
-          data: JSON.stringify(data),
+          data: toJson(data),
           result: EVAL_RESULT[result],
           meterInstrumentId: meterId,
           pressureGaugeInstrumentId: gaugeId,

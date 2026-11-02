@@ -7,6 +7,7 @@ import { useAction } from "@/components/ui/useAction";
 import { selectEvaluationForCertificate, deleteEvaluation, type ProductForEvaluation } from "@/lib/actions/evaluations";
 import { confirmToast } from "@/lib/confirm-toast";
 import { formatLima } from "@/lib/dates";
+import { fileUrl } from "@/lib/file-url";
 import { errorText } from "@/components/ui/styles";
 import NewEvaluationShellForm from "./NewEvaluationShellForm";
 
@@ -50,6 +51,12 @@ export default function EvaluationsSection({ data, evaluatorName }: { data: Prod
         <div className="space-y-3">
           {evaluations.map((ev) => (
             <div key={ev.id} className={`flex flex-wrap items-center gap-3 rounded-lg border bg-surface p-3 ${ev.selectedForCertificate ? "border-primary" : "border-border"}`}>
+              {fileUrl(ev.photoPath) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={fileUrl(ev.photoPath)!} alt="" className="h-14 w-14 flex-shrink-0 rounded-md border border-border bg-bg object-contain" />
+              ) : (
+                <div className="h-14 w-14 flex-shrink-0 rounded-md border border-dashed border-border" />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   {!ev.result ? (
